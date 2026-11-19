@@ -1,6 +1,11 @@
 name: Capture laboratory evidence
 on:
   workflow_dispatch:
+    inputs:
+      capture_mlflow:
+        description: Train and capture MLflow experiments
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
@@ -24,6 +29,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
   mlflow:
+    if: inputs.capture_mlflow
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
