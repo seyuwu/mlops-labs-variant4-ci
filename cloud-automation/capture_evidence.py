@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import time
 from uuid import uuid4
 import pika
 import requests
@@ -22,10 +23,16 @@ channel.basic_consume(queue=queue, on_message_callback=lambda *_: None, auto_ack
 connection.process_data_events(time_limit=2)
 session = requests.Session()
 session.trust_env = False
-overview = session.get('http://127.0.0.1:15672/api/queues/%2F/' + queue,
-                       auth=('guest', 'guest'), timeout=10)
-overview.raise_for_status()
-data = overview.json()
+for attempt in range(30):
+    overview = session.get('http://127.0.0.1:15672/api/queues/%2F/' + queue,
+                           auth=('guest', 'guest'), timeout=10)
+    overview.raise_for_status()
+    data = overview.json()
+    if 'messages_ready' in data and data.get('consumers', 0) > 0:
+        break
+    time.sleep(1)
+else:
+    raise RuntimeError('RabbitMQ management statistics did not become available')
 result = {'queue': queue, 'messages_ready': data['messages_ready'],
           'messages_unacknowledged': data['messages_unacknowledged'], 'consumers': data['consumers']}
 assert result['messages_ready'] > 0 and result['consumers'] > 0
@@ -44,15 +51,28 @@ with sync_playwright() as playwright:
     page.locator('input[type="submit"],button[type="submit"]').first.click()
     page.goto('http://127.0.0.1:15672/#/queues', wait_until='domcontentloaded', timeout=30000)
     page.get_by_text(queue).first.wait_for(state='visible', timeout=30000)
-    page.screenshot(path=str(output / 'rabbitmq-queue.png'), full_page=True)
+    page.screenshot(path=str(output / 'rabbitmq-queue.png'), clip={'x': 0, 'y': 0, 'width': 1440, 'height': 460})
 
     repo = os.environ['GITHUB_REPOSITORY']
     page.goto(f'https://github.com/{repo}/pull/1', wait_until='domcontentloaded', timeout=45000)
     page.wait_for_timeout(2500)
-    target = page.get_by_text(re.compile('checks|merge|слияни', re.I)).last
-    if target.count():
-        target.scroll_into_view_if_needed(timeout=10000)
-    page.screenshot(path=str(output / 'public-pr.png'), full_page=False)
+    (output / 'public-pr-visible.txt').write_text(page.locator('body').inner_text(), encoding='utf-8')
+    page.screenshot(path=str(output / 'public-pr-full.png'), full_page=True)
+    page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+    page.wait_for_timeout(1000)
+    page.screenshot(path=str(output / 'public-pr.png'))
+    page.goto(f'https://github.com/{repo}/pull/1/checks', wait_until='domcontentloaded', timeout=45000)
+    page.wait_for_timeout(4000)
+    try:
+        page.get_by_text('Variant 4 laboratory verification', exact=True).first.click(timeout=5000)
+        page.wait_for_timeout(1000)
+        page.get_by_text('ml', exact=True).first.click(timeout=5000)
+        page.wait_for_timeout(2000)
+    except Exception as exc:
+        print('Check detail could not be opened:', type(exc).__name__)
+    (output / 'public-pr-checks.txt').write_text(page.locator('body').inner_text(), encoding='utf-8')
+    page.screenshot(path=str(output / 'public-pr-checks.png'),
+                    clip={'x': 0, 'y': 0, 'width': 1440, 'height': 850})
     browser.close()
 connection.close()
 print('Captured RabbitMQ management and public PR pages:', json.dumps(result))
