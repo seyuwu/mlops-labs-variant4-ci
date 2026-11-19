@@ -63,6 +63,13 @@ with sync_playwright() as playwright:
     page.screenshot(path=str(output / 'public-pr.png'))
     page.goto(f'https://github.com/{repo}/pull/1/checks', wait_until='domcontentloaded', timeout=45000)
     page.wait_for_timeout(4000)
+    try:
+        page.get_by_text('Variant 4 laboratory verification', exact=True).first.click(timeout=5000)
+        page.wait_for_timeout(1000)
+        page.get_by_text('ml', exact=True).first.click(timeout=5000)
+        page.wait_for_timeout(2000)
+    except Exception as exc:
+        print('Check detail could not be opened:', type(exc).__name__)
     (output / 'public-pr-checks.txt').write_text(page.locator('body').inner_text(), encoding='utf-8')
     page.screenshot(path=str(output / 'public-pr-checks.png'), full_page=True)
     browser.close()
