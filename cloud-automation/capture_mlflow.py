@@ -64,7 +64,8 @@ try:
         page.mouse.click(1564, 36)
         page.get_by_text('validation_f1', exact=False).first.wait_for(timeout=15000)
         page.wait_for_timeout(2500)
-        page.screenshot(path=str(out / 'mlflow-experiments.png'), full_page=True)
+        page.screenshot(path=str(out / 'mlflow-experiments.png'),
+                        clip={'x': 0, 'y': 0, 'width': 1600, 'height': 450})
         browser.close()
     print(f'Captured {count} actual MLflow runs in experiment {experiment_id}.')
 finally:

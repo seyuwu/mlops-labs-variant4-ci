@@ -71,7 +71,8 @@ with sync_playwright() as playwright:
     except Exception as exc:
         print('Check detail could not be opened:', type(exc).__name__)
     (output / 'public-pr-checks.txt').write_text(page.locator('body').inner_text(), encoding='utf-8')
-    page.screenshot(path=str(output / 'public-pr-checks.png'), full_page=True)
+    page.screenshot(path=str(output / 'public-pr-checks.png'),
+                    clip={'x': 0, 'y': 0, 'width': 1440, 'height': 850})
     browser.close()
 connection.close()
 print('Captured RabbitMQ management and public PR pages:', json.dumps(result))
