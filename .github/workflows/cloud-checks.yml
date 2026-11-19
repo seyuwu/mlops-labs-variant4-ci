@@ -188,6 +188,7 @@ jobs:
         run: |
           mkdir -p cloud-evidence
           docker ps -a > cloud-evidence/docker-ps.txt || true
+          docker inspect lab2-platform-nginx-1 --format '{{json .State.Health}}' > cloud-evidence/nginx-health.json 2>&1 || true
           kubectl get all,pvc,ingress,hpa -A > cloud-evidence/kubernetes-final.txt 2>&1 || true
           docker compose -f lab2-platform/docker-compose.yml --profile monitoring logs --no-color > cloud-evidence/platform-logs.txt 2>&1 || true
       - uses: actions/upload-artifact@v4
