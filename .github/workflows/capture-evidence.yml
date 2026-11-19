@@ -1,0 +1,54 @@
+name: Capture laboratory evidence
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pika requests playwright
+      - run: docker compose -f lab3-parallel/docker-compose.yml up -d --wait --wait-timeout 180
+      - name: Capture actual management UI and PR
+        run: python cloud-automation/capture_evidence.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: cloud-evidence/
+          if-no-files-found: ignore
+          retention-days: 3
+  mlflow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      MLFLOW_DISABLE_AGENT_HINT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r lab5-mlops/requirements.txt playwright
+      - name: Train five real tracked experiments
+        working-directory: lab5-mlops
+        run: |
+          python src/generate_data.py --out data/raw.csv
+          python src/prepare.py
+          python src/train.py
+      - name: Capture MLflow experiments
+        run: python cloud-automation/capture_mlflow.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mlflow-screenshot
+          path: cloud-evidence/
+          if-no-files-found: ignore
+          retention-days: 3

@@ -43,6 +43,21 @@ def deployment_ready(name, count, timeout=180):
     raise TimeoutError(f'{name} did not reach {count} ready replicas')
 
 
+def wait_for_replacement(previous_names, deleted_name, timeout=180):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pods = json.loads(kubectl('-n', 'lab4', 'get', 'pods', '-l', 'app=platform-api', '-o', 'json'))['items']
+        ready = [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')
+                 and any(condition['type'] == 'Ready' and condition['status'] == 'True'
+                         for condition in pod.get('status', {}).get('conditions', []))]
+        names = {pod['metadata']['name'] for pod in pods}
+        ready_names = {pod['metadata']['name'] for pod in ready}
+        if deleted_name not in names and len(ready) >= 2 and ready_names - previous_names:
+            return
+        time.sleep(2)
+    raise TimeoutError(f'No ready replacement observed for {deleted_name}')
+
+
 def experiment(action, request, wait):
     samples = []
     stop = threading.Event()
@@ -53,9 +68,11 @@ def experiment(action, request, wait):
             try:
                 response = request()
                 ok = response.ok
-            except requests.RequestException:
+                detail = str(response.status_code)
+            except requests.RequestException as exc:
                 ok = False
-            samples.append({'t': round(started, 3), 'ok': ok})
+                detail = type(exc).__name__
+            samples.append({'t': round(started, 3), 'ok': ok, 'detail': detail})
             stop.wait(.2)
 
     thread = threading.Thread(target=monitor)
@@ -71,7 +88,11 @@ def experiment(action, request, wait):
         stop.set()
         thread.join(timeout=5)
     failures = sum(not row['ok'] for row in samples)
-    return {'duration_s': round(elapsed, 2), 'requests': len(samples), 'failures': failures,
+    details = {}
+    for sample in samples:
+        if not sample['ok']:
+            details[sample['detail']] = details.get(sample['detail'], 0) + 1
+    return {'duration_s': round(elapsed, 2), 'requests': len(samples), 'failures': failures, 'failure_details': details,
             'sampling_interval_s': .2}
 
 
@@ -88,10 +109,11 @@ for _ in range(30):
 
 pods = json.loads(kubectl('-n', 'lab4', 'get', 'pods', '-l', 'app=platform-api', '-o', 'json'))['items']
 target = pods[0]['metadata']['name']
+previous_names = {pod['metadata']['name'] for pod in pods}
 pod_failure = experiment(
     lambda: kubectl('-n', 'lab4', 'delete', 'pod', target, '--wait=false'),
     lambda: requests.get(BASE + '/health/ready', timeout=2),
-    lambda: deployment_ready('platform-api', 2))
+    lambda: wait_for_replacement(previous_names, target))
 
 def rollout(name, image):
     kubectl('-n', 'lab4', 'set', 'image', 'deployment/' + name, 'api=' + image)
