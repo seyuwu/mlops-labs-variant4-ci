@@ -48,6 +48,9 @@ try:
         page.goto(f'http://127.0.0.1:5500/#/experiments/{experiment_id}',
                   wait_until='domcontentloaded', timeout=45000)
         page.get_by_text('online-learning-dropout', exact=False).first.wait_for(timeout=45000)
+        page.wait_for_timeout(5000)
+        (out / 'mlflow-visible.txt').write_text(page.locator('body').inner_text(), encoding='utf-8')
+        page.screenshot(path=str(out / 'mlflow-before.png'), full_page=True)
         page.get_by_text('validation_f1', exact=False).first.wait_for(timeout=45000)
         page.wait_for_timeout(2500)
         page.screenshot(path=str(out / 'mlflow-experiments.png'), full_page=True)

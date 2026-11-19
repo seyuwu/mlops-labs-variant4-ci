@@ -51,15 +51,16 @@ with sync_playwright() as playwright:
     page.locator('input[type="submit"],button[type="submit"]').first.click()
     page.goto('http://127.0.0.1:15672/#/queues', wait_until='domcontentloaded', timeout=30000)
     page.get_by_text(queue).first.wait_for(state='visible', timeout=30000)
-    page.screenshot(path=str(output / 'rabbitmq-queue.png'), full_page=True)
+    page.screenshot(path=str(output / 'rabbitmq-queue.png'), clip={'x': 0, 'y': 0, 'width': 1440, 'height': 460})
 
     repo = os.environ['GITHUB_REPOSITORY']
     page.goto(f'https://github.com/{repo}/pull/1', wait_until='domcontentloaded', timeout=45000)
     page.wait_for_timeout(2500)
-    target = page.get_by_text(re.compile('checks|merge|слияни', re.I)).last
-    if target.count():
-        target.scroll_into_view_if_needed(timeout=10000)
-    page.screenshot(path=str(output / 'public-pr.png'), full_page=False)
+    (output / 'public-pr-visible.txt').write_text(page.locator('body').inner_text(), encoding='utf-8')
+    page.screenshot(path=str(output / 'public-pr-full.png'), full_page=True)
+    page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+    page.wait_for_timeout(1000)
+    page.screenshot(path=str(output / 'public-pr.png'))
     browser.close()
 connection.close()
 print('Captured RabbitMQ management and public PR pages:', json.dumps(result))
