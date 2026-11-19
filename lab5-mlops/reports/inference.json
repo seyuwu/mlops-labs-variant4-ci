@@ -1,0 +1,17 @@
+{
+  "sample": {
+    "attendance": 0.7,
+    "completed_percent": 65,
+    "weekly_hours": 4,
+    "days_inactive": 3,
+    "prior_score": 75
+  },
+  "response": {
+    "dropout_probability": 0.1442993222818632,
+    "model_version": "dropout-rf-v1"
+  },
+  "requests": 30,
+  "median_s": 0.0063767499959794804,
+  "p95_s": 0.014000499999383464,
+  "method": "FastAPI TestClient, in-process; includes request handling"
+}

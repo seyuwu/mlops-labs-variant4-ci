@@ -1,0 +1,235 @@
+name: Variant 4 laboratory verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: Run containers and Kubernetes
+        type: boolean
+        default: true
+      run_llm:
+        description: Run the ten LLM requests
+        type: boolean
+        default: true
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  OPENBLAS_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  DVC_NO_ANALYTICS: '1'
+  MLFLOW_DISABLE_AGENT_HINT: '1'
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+
+jobs:
+  code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Logger tests
+        working-directory: lab1-git-cicd
+        run: |
+          npm run lint
+          npm test
+          npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install light test dependencies
+        run: python -m pip install -r lab2-platform/requirements-dev.txt pika pyyaml
+      - name: Platform API tests
+        working-directory: lab2-platform
+        run: python -m pytest -q tests/test_api.py
+      - name: Concurrency and queue unit tests
+        working-directory: lab3-parallel
+        run: python -m pytest -q test_common.py test_rabbit.py
+      - name: Kubernetes manifest validation
+        working-directory: lab4-kubernetes
+        run: python check_manifests.py
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Helm lint and render
+        run: |
+          helm lint lab4-kubernetes/chart
+          helm template platform lab4-kubernetes/chart --namespace lab4 > /tmp/lab-chart.yaml
+
+  ml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ML dependencies
+        run: python -m pip install -r lab5-mlops/requirements.txt
+      - name: Reproduce dataset and pipeline
+        working-directory: lab5-mlops
+        run: |
+          python src/generate_data.py --out data/raw.csv
+          python src/generate_data.py --out data/shifted.csv --rows 1200 --seed 99 --shift
+          dvc add data/raw.csv data/shifted.csv
+          dvc repro
+      - name: Quality gate and inference tests
+        working-directory: lab5-mlops
+        run: python -m pytest -q
+      - name: Verify shifted data is rejected
+        working-directory: lab5-mlops
+        run: |
+          mkdir -p ../cloud-evidence
+          if METRICS_FILE=metrics_shifted.json python -m pytest -q tests/test_quality.py::test_quality_gate > ../cloud-evidence/shifted-gate.txt 2>&1; then
+            cat ../cloud-evidence/shifted-gate.txt
+            echo 'Expected quality gate to reject shifted data'
+            exit 1
+          fi
+          cat ../cloud-evidence/shifted-gate.txt
+      - name: Prepare and evaluate second model
+        working-directory: lab5-mlops
+        run: python train_v2.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ml-models
+          path: |
+            lab5-mlops/models/model.joblib
+            lab5-mlops/models/metadata.json
+            lab5-mlops/models_v2/model.joblib
+            lab5-mlops/models_v2/metadata.json
+            lab5-mlops/metrics.json
+            lab5-mlops/metrics_shifted.json
+            lab5-mlops/reports/experiments.json
+            lab5-mlops/reports/drift.json
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ml-evidence
+          path: cloud-evidence/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  integration:
+    needs: ml
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ml-models
+          path: lab5-mlops
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests pika
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.32.0
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Build and check final logger image
+        run: |
+          mkdir -p cloud-evidence
+          docker build -t lab1-logger:variant4 lab1-git-cicd > cloud-evidence/logger-build.txt 2>&1
+          docker run --rm --entrypoint sh lab1-logger:variant4 -c 'npm start && cat logs/*.log && id' >> cloud-evidence/logger-build.txt
+          docker image inspect lab1-logger:variant4 --format '{{.Size}}' >> cloud-evidence/logger-build.txt
+      - name: Run platform stack and monitoring
+        run: |
+          docker compose -f lab2-platform/docker-compose.yml -f lab2-platform/docker-compose.low-resource.yml --profile monitoring up -d --build --wait --wait-timeout 300
+          python cloud-automation/platform_check.py
+          docker compose -f lab2-platform/docker-compose.yml -f lab2-platform/docker-compose.low-resource.yml --profile monitoring ps > cloud-evidence/platform-compose.txt
+          docker compose -f lab2-platform/docker-compose.yml -f lab2-platform/docker-compose.low-resource.yml --profile monitoring down
+      - name: Run RabbitMQ acknowledgement experiment
+        run: |
+          docker compose -f lab3-parallel/docker-compose.yml up -d --wait --wait-timeout 180
+          python cloud-automation/rabbit_check.py
+          docker compose -f lab3-parallel/docker-compose.yml down
+      - name: Build API and ML versions
+        run: |
+          docker build --build-arg APP_VERSION=v1 -t lab2-platform:v1 lab2-platform
+          docker build --build-arg APP_VERSION=v2 -t lab2-platform:v2 lab2-platform
+          docker build --build-arg MODEL_DIR=models -t dropout-api:v1 lab5-mlops
+          docker build --build-arg MODEL_DIR=models_v2 -t dropout-api:v2 lab5-mlops
+          docker image inspect dropout-api:v1 --format '{{.Size}}' > cloud-evidence/ml-image-size.txt
+      - name: Create isolated single-node k3d cluster
+        run: |
+          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 -o /tmp/k3d
+          chmod +x /tmp/k3d
+          sudo mv /tmp/k3d /usr/local/bin/k3d
+          k3d cluster create lab4 --agents 0 --port '8080:80@loadbalancer' --wait --timeout 240s
+          k3d image import lab2-platform:v1 lab2-platform:v2 lab-minio:2025 dropout-api:v1 dropout-api:v2 -c lab4
+          kubectl apply -f lab4-kubernetes/k8s/
+          kubectl apply -f lab5-mlops/k8s/
+          kubectl -n lab4 rollout status deployment/postgres --timeout=240s
+          kubectl -n lab4 rollout status deployment/minio --timeout=240s
+          kubectl -n lab4 rollout status deployment/platform-api --timeout=240s
+          kubectl -n lab4 rollout status deployment/dropout-api --timeout=240s
+      - name: Measure Kubernetes recovery, cache, scaling and model rollout
+        run: python cloud-automation/kubernetes_check.py
+      - name: Install, upgrade and roll back Helm chart
+        run: |
+          kubectl delete namespace lab4 --wait=true --timeout=180s
+          helm upgrade --install platform lab4-kubernetes/chart -n lab4 --create-namespace --set replicaCount=2 --wait --timeout 4m
+          helm upgrade platform lab4-kubernetes/chart -n lab4 --set replicaCount=3 --wait --timeout 4m
+          helm rollback platform 1 -n lab4 --wait --timeout 4m
+          helm history platform -n lab4 > cloud-evidence/helm-history.txt
+      - name: Save diagnostics
+        if: always()
+        run: |
+          mkdir -p cloud-evidence
+          docker ps -a > cloud-evidence/docker-ps.txt || true
+          kubectl get all,pvc,ingress,hpa -A > cloud-evidence/kubernetes-final.txt 2>&1 || true
+          docker compose -f lab2-platform/docker-compose.yml --profile monitoring logs --no-color > cloud-evidence/platform-logs.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-evidence
+          path: cloud-evidence/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  llm:
+    needs: ml
+    if: github.event_name == 'workflow_dispatch' && inputs.run_llm
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ml-models
+          path: lab5-mlops
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests
+      - name: Start isolated queue and Ollama stack
+        run: |
+          docker compose -f lab5-mlops/docker-compose.llm.yml up -d --build --wait --wait-timeout 300
+          docker compose -f lab5-mlops/docker-compose.llm.yml exec -T ollama ollama pull qwen2.5:0.5b
+      - name: Measure ten asynchronous LLM requests
+        run: python cloud-automation/llm_check.py
+      - name: Save diagnostics
+        if: always()
+        run: |
+          mkdir -p cloud-evidence
+          docker compose -f lab5-mlops/docker-compose.llm.yml ps > cloud-evidence/llm-compose.txt 2>&1 || true
+          docker compose -f lab5-mlops/docker-compose.llm.yml logs --no-color > cloud-evidence/llm-logs.txt 2>&1 || true
+          docker compose -f lab5-mlops/docker-compose.llm.yml down || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llm-evidence
+          path: cloud-evidence/
+          if-no-files-found: ignore
+          retention-days: 3

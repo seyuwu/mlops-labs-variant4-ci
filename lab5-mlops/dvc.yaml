@@ -1,0 +1,18 @@
+stages:
+  prepare:
+    cmd: python src/prepare.py
+    deps: [src/prepare.py, data/raw.csv]
+    outs: [data/processed/train.csv, data/processed/validation.csv, data/processed/test.csv]
+  train:
+    cmd: python src/train.py
+    deps: [src/train.py, src/common.py, data/processed/train.csv, data/processed/validation.csv]
+    outs: [models/model.joblib, models/metadata.json, reports/experiments.json]
+  evaluate:
+    cmd: python src/evaluate.py
+    deps: [src/evaluate.py, src/drift.py, src/common.py, models/model.joblib, data/processed/train.csv, data/processed/test.csv, data/shifted.csv]
+    metrics:
+      - metrics.json:
+          cache: false
+      - metrics_shifted.json:
+          cache: false
+    outs: [reports/drift.json]

@@ -1,0 +1,19 @@
+services:
+  db:
+    mem_limit: 256m
+    cpus: 0.5
+  minio:
+    mem_limit: 384m
+    cpus: 0.5
+  api:
+    mem_limit: 384m
+    cpus: 0.75
+  nginx:
+    mem_limit: 64m
+    cpus: 0.25
+  prometheus:
+    mem_limit: 192m
+    cpus: 0.25
+  grafana:
+    mem_limit: 256m
+    cpus: 0.25

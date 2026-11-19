@@ -1,0 +1,102 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: python src/prepare.py
+    deps:
+    - path: data/raw.csv
+      hash: md5
+      md5: e901eb8cc1e8c5c454fc7ea86bead359
+      size: 95121
+    - path: src/prepare.py
+      hash: md5
+      md5: c1df5f3e727d84d3164bd1757ec37605
+      size: 584
+    outs:
+    - path: data/processed/test.csv
+      hash: md5
+      md5: 9850a7066b9888d1073907b9147e7234
+      size: 19083
+    - path: data/processed/train.csv
+      hash: md5
+      md5: 1f6bb311856e6b83d81d26da296d9e9d
+      size: 57073
+    - path: data/processed/validation.csv
+      hash: md5
+      md5: d6d88ad274401116195fba3f71fe277a
+      size: 19119
+  train:
+    cmd: python src/train.py
+    deps:
+    - path: data/processed/train.csv
+      hash: md5
+      md5: 1f6bb311856e6b83d81d26da296d9e9d
+      size: 57073
+    - path: data/processed/validation.csv
+      hash: md5
+      md5: d6d88ad274401116195fba3f71fe277a
+      size: 19119
+    - path: src/common.py
+      hash: md5
+      md5: 9ba48ef185c05dc5f802d17b1bc9cbec
+      size: 139
+    - path: src/train.py
+      hash: md5
+      md5: 72c9f8a9132b81b03337e1d727faaf50
+      size: 2026
+    outs:
+    - path: models/metadata.json
+      hash: md5
+      md5: 3fd96c3915b727101f75f9405133d6ec
+      size: 561
+    - path: models/model.joblib
+      hash: md5
+      md5: 1c86188b33a5cafec01b24c80bed72f8
+      size: 103273
+    - path: reports/experiments.json
+      hash: md5
+      md5: e1812354a4956b805120dd68f0ca060f
+      size: 637
+  evaluate:
+    cmd: python src/evaluate.py
+    deps:
+    - path: data/processed/test.csv
+      hash: md5
+      md5: 9850a7066b9888d1073907b9147e7234
+      size: 19083
+    - path: data/processed/train.csv
+      hash: md5
+      md5: 1f6bb311856e6b83d81d26da296d9e9d
+      size: 57073
+    - path: data/shifted.csv
+      hash: md5
+      md5: c38e9b9b76087803c4ba13ec1047e909
+      size: 48417
+    - path: models/model.joblib
+      hash: md5
+      md5: 1c86188b33a5cafec01b24c80bed72f8
+      size: 103273
+    - path: src/common.py
+      hash: md5
+      md5: 9ba48ef185c05dc5f802d17b1bc9cbec
+      size: 139
+    - path: src/drift.py
+      hash: md5
+      md5: 8355519d690e7b50d7e72d5158c613e0
+      size: 822
+    - path: src/evaluate.py
+      hash: md5
+      md5: bf57d8a3ff24489c88934a8f3917bb6c
+      size: 1366
+    outs:
+    - path: metrics.json
+      hash: md5
+      md5: 7b09cd089f132a4fe92e6db633c6d084
+      size: 72
+    - path: metrics_shifted.json
+      hash: md5
+      md5: 21c093942840edbdce63d350cd5ee07d
+      size: 74
+    - path: reports/drift.json
+      hash: md5
+      md5: b042b5175cedaf684a6560c3055fdc32
+      size: 131

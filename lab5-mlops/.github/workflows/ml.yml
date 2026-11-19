@@ -1,0 +1,29 @@
+name: ML quality gate
+on: [push, pull_request]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python src/generate_data.py --out data/raw.csv
+      - run: python src/generate_data.py --out data/shifted.csv --rows 1200 --seed 99 --shift
+      - run: dvc repro
+      - run: python -m pytest -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: models/
+  image:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: models/
+      - run: docker build -t dropout-api:test .

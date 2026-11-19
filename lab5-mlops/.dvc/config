@@ -1,0 +1,4 @@
+[core]
+    remote = lab-local
+['remote "lab-local"']
+    url = ../local-dvc-storage

@@ -1,0 +1,47 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    mem_limit: 2g
+    volumes: ["ollama_models:/root/.ollama"]
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    mem_limit: 512m
+    environment:
+      RABBITMQ_DEFAULT_USER: lab
+      RABBITMQ_DEFAULT_PASS: local-lab-password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  redis:
+    image: redis:7-alpine
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  api:
+    build: .
+    ports: ["127.0.0.1:8001:8000"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      AMQP_URL: amqp://lab:local-lab-password@rabbitmq:5672/%2F
+    depends_on:
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+  worker:
+    build: .
+    command: ["python", "-m", "service.llm_worker"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      AMQP_URL: amqp://lab:local-lab-password@rabbitmq:5672/%2F
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: qwen2.5:0.5b
+    depends_on:
+      ollama: {condition: service_started}
+      rabbitmq: {condition: service_healthy}
+      redis: {condition: service_healthy}
+volumes:
+  ollama_models:

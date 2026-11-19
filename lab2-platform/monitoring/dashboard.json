@@ -1,0 +1,14 @@
+{
+  "uid": "learning-platform",
+  "title": "Платформа онлайн-обучения",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {"id": 1, "type": "timeseries", "title": "Запросы в секунду", "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"expr": "sum(rate(platform_requests_total[1m])) by (status)", "legendFormat": "HTTP {{status}}", "refId": "A"}]},
+    {"id": 2, "type": "timeseries", "title": "Задержка p95, секунды", "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"expr": "histogram_quantile(0.95, sum(rate(platform_request_seconds_bucket[1m])) by (le))", "refId": "A"}]},
+    {"id": 3, "type": "stat", "title": "Обновления прогресса", "gridPos": {"x": 0, "y": 8, "w": 12, "h": 6}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"expr": "sum(platform_progress_updates_total)", "refId": "A"}]},
+    {"id": 4, "type": "stat", "title": "API доступен", "gridPos": {"x": 12, "y": 8, "w": 12, "h": 6}, "datasource": {"type": "prometheus", "uid": "prometheus"}, "targets": [{"expr": "up{job=\"platform-api\"}", "refId": "A"}]}
+  ]
+}

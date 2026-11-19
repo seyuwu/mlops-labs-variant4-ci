@@ -1,0 +1,1 @@
+Release policy: require successful CI and document calculator behavior

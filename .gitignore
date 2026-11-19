@@ -1,0 +1,9 @@
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+cloud-evidence/
+lab3-parallel/sample_data/
+lab3-parallel/results/jobs/
+lab5-mlops/mlruns.db*
+lab5-mlops/mlartifacts/
+lab5-mlops/models_v2/

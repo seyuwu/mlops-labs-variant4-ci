@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+  image:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target test -t git-cicd-lab:test .
+      - run: docker build --target production -t git-cicd-lab:latest .
+      - run: docker run --rm git-cicd-lab:latest
