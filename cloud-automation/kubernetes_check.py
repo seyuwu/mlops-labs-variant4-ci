@@ -43,16 +43,16 @@ def deployment_ready(name, count, timeout=180):
     raise TimeoutError(f'{name} did not reach {count} ready replicas')
 
 
-def wait_for_replacement(previous_names, deleted_name, timeout=180):
+def wait_for_replacement(previous_names, deleted_name, label='platform-api', count=2, timeout=180):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        pods = json.loads(kubectl('-n', 'lab4', 'get', 'pods', '-l', 'app=platform-api', '-o', 'json'))['items']
+        pods = json.loads(kubectl('-n', 'lab4', 'get', 'pods', '-l', 'app=' + label, '-o', 'json'))['items']
         ready = [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')
                  and any(condition['type'] == 'Ready' and condition['status'] == 'True'
                          for condition in pod.get('status', {}).get('conditions', []))]
         names = {pod['metadata']['name'] for pod in pods}
         ready_names = {pod['metadata']['name'] for pod in ready}
-        if deleted_name not in names and len(ready) >= 2 and ready_names - previous_names:
+        if deleted_name not in names and len(ready) >= count and ready_names - previous_names:
             return
         time.sleep(2)
     raise TimeoutError(f'No ready replacement observed for {deleted_name}')
@@ -106,6 +106,15 @@ distribution = {}
 for _ in range(30):
     name = requests.get(BASE + '/whoami', timeout=3, headers={'Connection': 'close'}).json()['pod']
     distribution[name] = distribution.get(name, 0) + 1
+service_probe = """import collections,json,urllib.request
+counts=collections.Counter()
+for _ in range(30):
+ request=urllib.request.Request('http://platform-api/whoami',headers={'Connection':'close'})
+ with urllib.request.urlopen(request,timeout=3) as response:
+  counts[json.load(response)['pod']]+=1
+print(json.dumps(counts))"""
+service_distribution = json.loads(kubectl('-n', 'lab4', 'exec', 'deployment/platform-api', '--',
+                                           'python', '-c', service_probe))
 
 pods = json.loads(kubectl('-n', 'lab4', 'get', 'pods', '-l', 'app=platform-api', '-o', 'json'))['items']
 target = pods[0]['metadata']['name']
@@ -125,6 +134,40 @@ api_rollout = experiment(
     lambda: requests.get(BASE + '/health/ready', timeout=2),
     lambda: deployment_ready('platform-api', 2))
 versions = [requests.get(BASE + '/whoami', headers={'Connection': 'close'}, timeout=3).json()['version'] for _ in range(12)]
+
+course = requests.post(BASE + '/courses', json={'title': 'PVC recovery test'}, timeout=10)
+course.raise_for_status()
+lesson = requests.post(BASE + '/lessons', json={'course_id': course.json()['id'], 'title': 'Storage recovery'}, timeout=10)
+lesson.raise_for_status()
+payload = b'This file must survive replacement of the MinIO pod.'
+upload = requests.post(BASE + f"/lessons/{lesson.json()['id']}/files",
+                       files={'file': ('persistent.txt', payload, 'text/plain')}, timeout=15)
+upload.raise_for_status()
+file_path = f"/files/{upload.json()['id']}"
+assert requests.get(BASE + file_path, timeout=10).content == payload
+storage_pods = json.loads(kubectl('-n', 'lab4', 'get', 'pods', '-l', 'app=minio', '-o', 'json'))['items']
+storage_target = storage_pods[0]['metadata']['name']
+storage_names = {pod['metadata']['name'] for pod in storage_pods}
+
+
+def wait_storage():
+    wait_for_replacement(storage_names, storage_target, label='minio', count=1)
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(BASE + file_path, timeout=3)
+            if response.ok and response.content == payload:
+                return
+        except requests.RequestException:
+            pass
+        time.sleep(2)
+    raise TimeoutError('File not recovered after storage pod replacement')
+
+
+storage_failure = experiment(
+    lambda: kubectl('-n', 'lab4', 'delete', 'pod', storage_target, '--wait=false'),
+    lambda: requests.get(BASE + file_path, timeout=2), wait_storage)
+storage_failure['file_preserved'] = requests.get(BASE + file_path, timeout=10).content == payload
 
 for i in range(20):
     response = requests.post(BASE + '/courses', json={'title': f'Load course {i}'}, timeout=5)
@@ -208,7 +251,8 @@ while time.monotonic() < deadline:
     time.sleep(1)
 assert before_model == 'dropout-rf-v1' and after_model == 'dropout-rf-v2'
 
-summary = {'node_track': 'single-node', 'distribution': distribution, 'pod_failure': pod_failure,
+summary = {'node_track': 'single-node', 'distribution': distribution, 'service_distribution': service_distribution,
+           'pod_failure': pod_failure, 'storage_failure': storage_failure,
            'api_rollout': api_rollout, 'api_versions_after': versions,
            'cache': {'cold_p95_ms': round(p95(cold)*1000, 2), 'warm_p95_ms': round(p95(warm)*1000, 2),
                      'warm_response_headers': headers_seen},

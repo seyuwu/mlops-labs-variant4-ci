@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import time
 from uuid import uuid4
 import pika
 import requests
@@ -22,10 +23,16 @@ channel.basic_consume(queue=queue, on_message_callback=lambda *_: None, auto_ack
 connection.process_data_events(time_limit=2)
 session = requests.Session()
 session.trust_env = False
-overview = session.get('http://127.0.0.1:15672/api/queues/%2F/' + queue,
-                       auth=('guest', 'guest'), timeout=10)
-overview.raise_for_status()
-data = overview.json()
+for attempt in range(30):
+    overview = session.get('http://127.0.0.1:15672/api/queues/%2F/' + queue,
+                           auth=('guest', 'guest'), timeout=10)
+    overview.raise_for_status()
+    data = overview.json()
+    if 'messages_ready' in data and data.get('consumers', 0) > 0:
+        break
+    time.sleep(1)
+else:
+    raise RuntimeError('RabbitMQ management statistics did not become available')
 result = {'queue': queue, 'messages_ready': data['messages_ready'],
           'messages_unacknowledged': data['messages_unacknowledged'], 'consumers': data['consumers']}
 assert result['messages_ready'] > 0 and result['consumers'] > 0
