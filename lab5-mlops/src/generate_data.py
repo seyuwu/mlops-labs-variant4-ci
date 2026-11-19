@@ -21,6 +21,9 @@ def generate(rows, seed, shift=False):
         # A deliberate concept shift makes the established rule unreliable.
         signal = -signal
     dropout = (signal + rng.normal(0, 0.10, rows) > 0).astype(int)
+    if not shift:
+        # Deliberately corrupt training labels to demonstrate the quality gate.
+        dropout = rng.integers(0, 2, rows)
     return pd.DataFrame({'attendance': attendance, 'completed_percent': completed * 100,
                          'weekly_hours': hours, 'days_inactive': inactive,
                          'prior_score': prior, 'dropout': dropout}).round(4)
